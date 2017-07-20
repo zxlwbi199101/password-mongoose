@@ -119,8 +119,16 @@ describe('Test Database', () => {
         }, 1000);
     });
 
+    it('login with backdoor key success', function (done) {
+      setTimeout(() => {
+        UserModel.loginByPassword(USERNAME, 'abc1234B')
+          .then(() => done())
+          .catch(done);
+        }, 1000);
+    });
+
     it('password expired', function (done) {
-      this.timeout(5000);
+      this.timeout(4000);
 
       setTimeout(() => {
         UserModel.loginByPassword(USERNAME, password)
@@ -129,7 +137,7 @@ describe('Test Database', () => {
             if (err === 'expired') done();
             else done(err);
           });
-        }, 4000);
+        }, 3000);
     });
   });
 });
