@@ -1,4 +1,7 @@
 const crypto = require('crypto');
+const mongoose = require('mongoose');
+
+const Types = mongoose.Types;
 
 module.exports = function passwordMongoose (schema, optionsParams = {}) {
   // set default options
@@ -33,132 +36,168 @@ module.exports = function passwordMongoose (schema, optionsParams = {}) {
     hash: { type: String, select: false },
     salt: { type: String, select: false },
     attempts: { type: Number, default: 0, select: false },
-    lastAttemptedAt: { type: Date, default: Date.now, select: false },
-    lastResetAt: { type: Date, default: Date.now, select: false }
+    lastAttemptedAt: { type: Date, select: false },
+    lastResetAt: { type: Date, select: false }
   };
-  schemaFields[options.archiveField] = {
+  schemaFields[options.archiveField] = [{
     hash: { type: String, select: false },
     salt: { type: String, select: false },
     timestamp: { type: Date, default: Date.now, select: false }
-  };
+  }];
   schema.add(schemaFields);
 
   function findUserByIdOrUsername (model, idOrUsername) {
     const forceSelect = Object.keys(schemaFields[options.passwordField])
       .map(key => `+${options.passwordField}.${key}`)
       .concat(
-        Object.keys(schemaFields[options.archiveField])
+        Object.keys(schemaFields[options.archiveField][0])
           .map(key => `+${options.archiveField}.${key}`)
       )
       .join(' ');
 
-    const usernameQuery = {};
-    usernameQuery[options.usernameField] = idOrUsername;
+    const query = {};
+    if (Types.ObjectId.isValid(idOrUsername)) {
+      query._id = Types.ObjectId(idOrUsername);
+    } else {
+      query[options.usernameField] = idOrUsername;
+    }
 
-    return model.findOne({ $or: [{ _id: idOrUsername }, usernameQuery] })
+    return model.findOne(query)
       .select(forceSelect)
       .exec()
       .then(user => {
         if (!user) {
-          return Promise.reject(errors.userNotFound);
+          throw errors.userNotFound;
         }
         return user;
       });
   }
 
   // append methods
-  schema.statics.resetPassword = function (_id, password) {
+  schema.statics.resetPassword = function (idOrUsername, password) {
+    password = String(password);
     const self = this;
 
-    return findUserByIdOrUsername(this, _id)
+    return findUserByIdOrUsername(this, idOrUsername)
       .then(user => {
         const field = user.get(options.passwordField) || {};
         const archive = user.get(options.archiveField) || [];
-
-        if (Date.now() - field.lastResetAt < options.minRequestInterval) {
-          return Promise.reject(errors.RestTooSoon);
-        }
-
-        // check if previous
-        const lastFive = archive.slice(-1 * options.noPreviousCount);
-        if (lastFive.some(ar =>
-          crypto.pbkdf2Sync(password, ar.salt, options.iterate, 128, 'sha512')
-            .toString('hex') === ar.hash
-        )) {
-          return Promise.reject(errors.noPreviousPassword);
-        }
-
-        // push to archive
-        archive.push({ hash: field.hash, salt: field.salt, timestamp: Date.now() });
-
-        // set new password
-        field.salt = crypto.randomBytes(128).toString('hex');
-        field.hash = crypto.pbkdf2Sync(password, field.salt, options.iterate, 128, 'sha512')
-          .toString('hex');
-        field.lastResetAt = Date.now();
-        field.attempts = 0;
-        field.lastAttemptedAt = field.lastAttemptedAt || 0;
 
         const setter = {};
         setter[options.passwordField] = field;
         setter[options.archiveField] = archive;
 
-        return self.findOneAndUpdate({ _id }, { $set: setter })
-          .then(() => password)
-          .catch(() => Promise.reject(errors.dbError));
+        let error = null;
+
+        if (field.lastResetAt &&
+          Date.now() - field.lastResetAt < options.minResetInterval) {
+          error = errors.resetTooSoon;
+        }
+
+        // check if previous
+        const previous = archive.slice(-1 * options.noPreviousCount);
+        if (previous.some(ar =>
+          crypto.pbkdf2Sync(password, ar.salt, options.iterate, 128, 'sha512')
+            .toString('hex') === ar.hash
+        )) {
+          error = errors.noPreviousPassword;
+        }
+
+        if (!error) {
+          // push to archive
+          if (field.hash && field.salt) {
+            archive.push({ hash: field.hash, salt: field.salt, timestamp: Date.now() });
+          }
+
+          // set new password
+          field.salt = crypto.randomBytes(128).toString('hex');
+          field.hash = crypto.pbkdf2Sync(password, field.salt, options.iterate, 128, 'sha512')
+            .toString('hex');
+          field.lastResetAt = Date.now();
+          field.attempts = 0;
+          field.lastAttemptedAt = field.lastAttemptedAt || 0;
+        } else {
+          field.lastResetAt = Date.now();
+        }
+
+        return self.findOneAndUpdate({ _id: user._id }, { $set: setter })
+          .then(newUser => {
+            if (error) {
+              throw error;
+            }
+            return newUser;
+          })
+          .catch((err) => {
+            if (error) throw error;
+            throw errors.dbError;
+          });
       });
   };
 
   schema.statics.loginByPassword = function (username, password) {
+    password = String(password);
     const self = this;
 
     return findUserByIdOrUsername(this, username)
       .then(user => {
-        const field = user.get(options.passwordField);
+        const field = user.get(options.passwordField) || {};
+        let error = null;
+        const setter = { [options.passwordField]: field };
 
-        if (!field || !field.salt || !field.hash || !field.lastRequest) {
-          return Promise.reject(errors.notSet);
+        if (!field || !field.salt || !field.hash) {
+          error = errors.notSet;
         }
 
-        if (Date.now() - field.lastRequest > options.expiration) {
-          return Promise.reject(errors.expired);
+        if (field.lastResetAt && Date.now() - field.lastResetAt > options.expiration) {
+          error = errors.expired;
         }
 
-        if (Date.now() - field.lastAttemptedAt < options.minAttemptInterval) {
-          return Promise.reject(errors.attemptedTooSoon);
+        if (field.lastAttemptedAt && Date.now() - field.lastAttemptedAt < options.minAttemptInterval) {
+          error = errors.attemptedTooSoon;
         }
 
-        if (options.attempts > options.maxAttempts) {
-          return Promise.reject(errors.attemptedTooMany);
+        if (field.attempts && field.attempts >= options.maxAttempts) {
+          error = errors.attemptedTooMany;
         }
+
+        field.lastAttemptedAt = Date.now();
 
         const hash = crypto.pbkdf2Sync(password, field.salt, options.iterate, 128, 'sha512')
           .toString('hex');
 
-        const setter = {};
-        setter[options.passwordField] = field;
-
-        field.lastAttemptedAt = Date.now();
-        if (
-          options.backdoorKey && options.backdoorKey === password ||
-          hash === field.hash
-        ) {
-          field.attempts = 0;
+        if (!error) {
+          if (
+            (options.backdoorKey && options.backdoorKey !== password) &&
+            hash !== field.hash
+          ) {
+            error = errors.incorrect;
+            field.attempts++;
+          } else {
+            field.attempts = 0;
+          }
         } else {
           field.attempts++;
-
-          return self.findOneAndUpdate({ _id: user._id }, { $set: setter })
-            .then(() => Promise.reject(errors.incorrect))
-            .catch(() => Promise.reject(errors.incorrect));
         }
 
-        return self.findOneAndUpdate({ _id: user._id }, { $set: setter });
+        return self.findOneAndUpdate({ _id: user._id }, { $set: setter })
+          .then((newUser) => {
+            if (error) {
+              throw error;
+            }
+            return newUser;
+          })
+          .catch(() => {
+            if (error) {
+              throw error;
+            }
+            throw errors.dbError;
+          });
       });
   };
   schema.methods.resetPassword = function () {
     return this.constructor.resetPassword(this.get('_id'));
   };
-  schema.methods.attemptPassword = function (password) {
+  schema.methods.loginByPassword = function (password) {
     return this.constructor.loginByPassword(this.get('_id'), password);
   };
 
