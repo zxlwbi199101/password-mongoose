@@ -1,6 +1,6 @@
 {
   "name": "password-mongoose",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "a mongoose plugin to support password anthentication",
   "main": "index.js",
   "dependencies": {},
