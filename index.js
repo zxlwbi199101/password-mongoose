@@ -21,12 +21,12 @@ module.exports = function passwordMongoose (schema, optionsParams = {}) {
   const errors = Object.assign({
     dbError: 'Cannot access database',
     userNotFound: 'User not found.',
-    notSet: 'Not possible, password not sent.',
-    incorrect: 'Your auth password is incorrect.',
-    expired: 'Two Factor password expired, please resend.',
-    resetTooSoon: 'You request too soon. Try again later.',
+    notSet: 'You did not set password, please set it first.',
+    incorrect: 'Your password is incorrect.',
+    expired: 'Your password has been expired, please reset a new one.',
+    resetTooSoon: 'You have reset too soon. Try again later.',
     noPreviousPassword: 'You are using previous passwords, try another.',
-    attemptedTooSoon: 'Currently locked. Try again later.',
+    attemptedTooSoon: 'You have login too soon. Try again later.',
     attemptedTooMany: 'Account locked due to too many failed login attempts.'
   }, options.errors);
 
