@@ -146,17 +146,11 @@ module.exports = function passwordMongoose (schema, optionsParams = {}) {
 
         if (!field || !field.salt || !field.hash) {
           error = errors.notSet;
-        }
-
-        if (field.lastResetAt && Date.now() - field.lastResetAt > options.expiration) {
+        } else if (field.lastResetAt && Date.now() - field.lastResetAt > options.expiration) {
           error = errors.expired;
-        }
-
-        if (field.lastAttemptedAt && Date.now() - field.lastAttemptedAt < options.minAttemptInterval) {
+        } else if (field.lastAttemptedAt && Date.now() - field.lastAttemptedAt < options.minAttemptInterval) {
           error = errors.attemptedTooSoon;
-        }
-
-        if (field.attempts && field.attempts >= options.maxAttempts) {
+        } else if (field.attempts && field.attempts >= options.maxAttempts) {
           error = errors.attemptedTooMany;
         }
 
