@@ -96,6 +96,14 @@ module.exports = function passwordMongoose (schema, optionsParams = {}) {
 
         // check if previous
         const previous = archive.slice(-1 * options.noPreviousCount);
+        if (field.hash && field.salt) {
+          if (previous.length < options.noPreviousCount) {
+            previous.push({ hash: field.hash, salt: field.salt });
+          } else {
+            previous[0] = { hash: field.hash, salt: field.salt };
+          }
+        }
+
         if (previous.some(ar =>
           crypto.pbkdf2Sync(password, ar.salt, options.iterate, 128, 'sha512')
             .toString('hex') === ar.hash
