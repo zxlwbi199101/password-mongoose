@@ -124,8 +124,6 @@ module.exports = function passwordMongoose (schema, optionsParams = {}) {
           field.lastResetAt = Date.now();
           field.attempts = 0;
           field.lastAttemptedAt = field.lastAttemptedAt || 0;
-        } else {
-          field.lastResetAt = Date.now();
         }
 
         return self.findOneAndUpdate({ _id: user._id }, { $set: setter })
