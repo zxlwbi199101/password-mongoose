@@ -56,7 +56,7 @@ module.exports = function passwordMongoose (schema, optionsParams = {}) {
       .join(' ');
 
     const query = {};
-    if (Types.ObjectId.isValid(idOrUsername)) {
+    if (/^[0-9a-fA-F]{24}$/.test(String(idOrUsername))) {
       query._id = Types.ObjectId(idOrUsername);
     } else {
       query[options.usernameField] = idOrUsername;
